@@ -39,6 +39,8 @@
 #include "wine/unicode.h"
 #include "x11drv.h"
 
+#include "wine/hack_force_gpu.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
@@ -852,17 +854,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
 
     for (gpu = 0; gpu < gpu_count; gpu++)
     {
-        {
-            const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-            if (sgi && *sgi != '0')
-            {
-                if (gpus[gpu].vendor_id == 0x10de /* NVIDIA */)
-                {
-                    gpus[gpu].vendor_id = 0x1002; /* AMD */
-                    gpus[gpu].device_id = 0x67df; /* RX 480 */
-                }
-            }
-        }
+        HACK_force_gpu(&gpus[gpu].vendor_id, &gpus[gpu].device_id, 0);
 
         if (!X11DRV_InitGpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW, &gpu_luid))
             goto done;

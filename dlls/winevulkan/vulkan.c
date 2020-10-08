@@ -33,6 +33,8 @@
 
 #include "vulkan_private.h"
 
+#include "wine/hack_force_gpu.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
@@ -1431,17 +1433,7 @@ void WINAPI wine_vkGetPhysicalDeviceProperties(VkPhysicalDevice physical_device,
 
     thunk_vkGetPhysicalDeviceProperties(physical_device, properties);
 
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties->vendorID == 0x10de /* NVIDIA */)
-            {
-                properties->vendorID = 0x1002; /* AMD */
-                properties->deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
+    HACK_force_gpu(&properties->vendorID, &properties->deviceID, 0);
 }
 
 /* Wait until graphics driver is loaded by explorer */
@@ -1508,17 +1500,7 @@ void WINAPI wine_vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
     thunk_vkGetPhysicalDeviceProperties2(phys_dev, properties2);
     fill_luid_property(properties2);
 
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
-            {
-                properties2->properties.vendorID = 0x1002; /* AMD */
-                properties2->properties.deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
+    HACK_force_gpu(&properties2->properties.vendorID, &properties2->properties.deviceID, 0);
 }
 
 void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
@@ -1529,17 +1511,7 @@ void WINAPI wine_vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
     thunk_vkGetPhysicalDeviceProperties2KHR(phys_dev, properties2);
     fill_luid_property(properties2);
 
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
-            {
-                properties2->properties.vendorID = 0x1002; /* AMD */
-                properties2->properties.deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
+    HACK_force_gpu(&properties2->properties.vendorID, &properties2->properties.deviceID, 0);
 }
 
 void WINAPI wine_vkGetPhysicalDeviceExternalSemaphoreProperties(VkPhysicalDevice phys_dev,
