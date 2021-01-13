@@ -891,31 +891,9 @@ static IAudioFormatEnumeratorVtbl IAudioFormatEnumerator_vtbl = {
 HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
 {
     SpatialAudioImpl *obj;
-    IPropertyStore *ps;
-    PROPVARIANT pv;
+    IAudioClient *aclient;
+    WAVEFORMATEX *closest;
     HRESULT hr;
-    WAVEFORMATEXTENSIBLE *fmtex;
-
-    hr = IMMDevice_OpenPropertyStore(mmdev, STGM_READ, &ps);
-    if(FAILED(hr)){
-        WARN("OpenPropertyStore failed: %08x\n", hr);
-        return hr;
-    }
-
-    pv.vt = VT_EMPTY;
-    hr = IPropertyStore_GetValue(ps, (const PROPERTYKEY *)&PKEY_AudioEngine_DeviceFormat, &pv);
-    if(FAILED(hr)){
-        WARN("Failed to get DeviceFormat: %08x\n", hr);
-        IPropertyStore_Release(ps);
-        return hr;
-    }
-
-    if(pv.vt != VT_BLOB || pv.u.blob.cbSize == 0){
-        WARN("Got invalid DeviceFormat\n");
-        PropVariantClear(&pv);
-        IPropertyStore_Release(ps);
-        return E_FAIL;
-    }
 
     obj = heap_alloc_zero(sizeof(*obj));
 
@@ -923,24 +901,39 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
     obj->ISpatialAudioClient_iface.lpVtbl = &ISpatialAudioClient_vtbl;
     obj->IAudioFormatEnumerator_iface.lpVtbl = &IAudioFormatEnumerator_vtbl;
 
-    obj->mmdev = mmdev;
-    IMMDevice_AddRef(mmdev);
-
-    fmtex = (WAVEFORMATEXTENSIBLE *)pv.u.blob.pBlobData;
-
-    obj->object_fmtex.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    obj->object_fmtex.Format.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
     obj->object_fmtex.Format.nChannels = 1;
-    obj->object_fmtex.Format.nSamplesPerSec = fmtex->Format.nSamplesPerSec;
+    obj->object_fmtex.Format.nSamplesPerSec = 48000;
     obj->object_fmtex.Format.wBitsPerSample = sizeof(float) * 8;
     obj->object_fmtex.Format.nBlockAlign = (obj->object_fmtex.Format.nChannels * obj->object_fmtex.Format.wBitsPerSample) / 8;
     obj->object_fmtex.Format.nAvgBytesPerSec = obj->object_fmtex.Format.nSamplesPerSec * obj->object_fmtex.Format.nBlockAlign;
-    obj->object_fmtex.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMAT);
-    obj->object_fmtex.Samples.wValidBitsPerSample = obj->object_fmtex.Format.wBitsPerSample;
-    obj->object_fmtex.dwChannelMask = 0;
-    obj->object_fmtex.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+    obj->object_fmtex.Format.cbSize = 0;
 
-    PropVariantClear(&pv);
-    IPropertyStore_Release(ps);
+    obj->mmdev = mmdev;
+    IMMDevice_AddRef(mmdev);
+
+    hr = IMMDevice_Activate(obj->mmdev, &IID_IAudioClient,
+            CLSCTX_INPROC_SERVER, NULL, (void**)&aclient);
+
+    if(FAILED(hr)){
+        WARN("Activate failed: %08x\n", hr);
+        return hr;
+    }
+
+    hr = IAudioClient_IsFormatSupported(aclient, AUDCLNT_SHAREMODE_SHARED, &obj->object_fmtex.Format, &closest);
+
+    IAudioClient_Release(aclient);
+
+    if(hr == S_FALSE){
+        WARN("The audio stack doesn't support 48kHz 32bit float. Using the closest match. Audio may be glitchy.\n");
+        memcpy(&obj->object_fmtex,
+               closest,
+               closest->wFormatTag == WAVE_FORMAT_EXTENSIBLE ? sizeof(WAVEFORMATEXTENSIBLE) : sizeof(WAVEFORMATEX));
+        CoTaskMemFree(closest);
+    } else if(hr != S_OK){
+        WARN("Checking supported formats failed: %08x\n", hr);
+        return hr;
+    }
 
     *out = &obj->ISpatialAudioClient_iface;
 
