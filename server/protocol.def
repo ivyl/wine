@@ -373,11 +373,20 @@ typedef union
         unsigned char  usage;
         unsigned int   length;
     } hid;
+    struct
+    {
+        int            type;    /* HW_INPUT_DEVICE_CHANGE */
+        obj_handle_t   device;
+        unsigned char  usage_page;
+        unsigned char  usage;
+        lparam_t       wparam;
+    } device_change;
 } hw_input_t;
-#define HW_INPUT_MOUSE    0
-#define HW_INPUT_KEYBOARD 1
-#define HW_INPUT_HARDWARE 2
-#define HW_INPUT_HID      3
+#define HW_INPUT_MOUSE         0
+#define HW_INPUT_KEYBOARD      1
+#define HW_INPUT_HARDWARE      2
+#define HW_INPUT_HID           3
+#define HW_INPUT_DEVICE_CHANGE 4
 
 typedef union
 {

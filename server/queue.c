@@ -366,6 +366,21 @@ static int assign_thread_input( struct thread *thread, struct thread_input *new_
     return 1;
 }
 
+static struct message *alloc_hardware_message_no_data( unsigned int time )
+{
+    struct message *msg;
+
+    if (!(msg = mem_alloc( sizeof(*msg) ))) return NULL;
+
+    memset( msg, 0, sizeof(*msg) );
+    msg->type      = MSG_HARDWARE;
+    msg->time      = time;
+    msg->data      = NULL;
+    msg->data_size = 0;
+
+    return msg;
+}
+
 /* allocate a hardware message and its data */
 static struct message *alloc_hardware_message( lparam_t info, struct hw_msg_source source,
                                                unsigned int time, data_size_t extra_len )
@@ -373,15 +388,13 @@ static struct message *alloc_hardware_message( lparam_t info, struct hw_msg_sour
     struct hardware_msg_data *msg_data;
     struct message *msg;
 
-    if (!(msg = mem_alloc( sizeof(*msg) ))) return NULL;
+    if (!(msg = alloc_hardware_message_no_data( time ))) return NULL;
     if (!(msg_data = mem_alloc( sizeof(*msg_data) + extra_len )))
     {
         free( msg );
         return NULL;
     }
-    memset( msg, 0, sizeof(*msg) );
-    msg->type      = MSG_HARDWARE;
-    msg->time      = time;
+
     msg->data      = msg_data;
     msg->data_size = sizeof(*msg_data) + extra_len;
 
@@ -1511,7 +1524,7 @@ static user_handle_t find_hardware_message_window( struct desktop *desktop, stru
 
     *thread = NULL;
     *msg_code = msg->msg;
-    if (msg->msg == WM_INPUT)
+    if (msg->msg == WM_INPUT || msg->msg == WM_INPUT_DEVICE_CHANGE)
     {
         if (!(win = msg->win) && input) win = input->focus;
     }
@@ -1600,7 +1613,7 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
         if (msg->wparam == VK_SHIFT || msg->wparam == VK_LSHIFT || msg->wparam == VK_RSHIFT)
             msg->lparam &= ~(KF_EXTENDED << 16);
     }
-    else if (msg->msg != WM_INPUT)
+    else if (msg->msg != WM_INPUT && msg->msg != WM_INPUT_DEVICE_CHANGE)
     {
         if (msg->msg == WM_MOUSEMOVE)
         {
@@ -2079,6 +2092,58 @@ static void queue_hid_message( user_handle_t win, const hw_input_t *input,
     enum_processes( queue_rawinput_message, &raw_msg );
 }
 
+static int queue_rawinput_device_change_message( struct process* process, void *arg )
+{
+    const hw_input_t *input = arg;
+    const struct rawinput_device_entry *entry;
+    const struct rawinput_device *device = NULL;
+    struct desktop *target_desktop = NULL, *desktop = NULL;
+    struct thread *target_thread = NULL, *foreground = NULL;
+    struct message *msg;
+
+    if (!(entry = find_rawinput_device( process, input->device_change.usage_page, input->device_change.usage )))
+        return 0;
+
+    device = &entry->device;
+
+    if (!(device->flags & RIDEV_DEVNOTIFY))
+        return 0;
+
+    if (!(desktop = get_desktop_obj( process, process->desktop, 0 ))) goto done;
+    if (!(foreground = get_foreground_thread( desktop, 0 ))) goto done;
+
+    if (process != foreground->process)
+    {
+        if (!(target_thread = get_window_thread( device->target ))) goto done;
+        if (!(target_desktop = get_thread_desktop( target_thread, 0 ))) goto done;
+        if (target_desktop != desktop) goto done;
+    }
+
+    if (!(msg = alloc_hardware_message_no_data( get_tick_count() )))
+        goto done;
+
+    msg->win    = device->target;
+    msg->msg    = WM_INPUT_DEVICE_CHANGE;
+    msg->wparam = input->device_change.wparam;
+    msg->lparam = (lparam_t) input->device_change.device;
+
+    queue_hardware_message( desktop, msg, 1 );
+
+done:
+    if (target_thread) release_object( target_thread );
+    if (target_desktop) release_object( target_desktop );
+    if (foreground) release_object( foreground );
+    if (desktop) release_object( desktop );
+    return 0;
+}
+
+static void queue_hid_device_change_message( const hw_input_t *input,
+                                             unsigned int origin)
+{
+    enum_processes( queue_rawinput_device_change_message, (void*)input );
+}
+
+
 /* check message filter for a hardware message */
 static int check_hw_message_filter( user_handle_t win, unsigned int msg_code,
                                     user_handle_t filter_win, unsigned int first, unsigned int last )
@@ -2197,10 +2262,13 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         reply->y      = msg->y;
         reply->time   = msg->time;
 
-        data->hw_id = msg->unique_id;
-        set_reply_data( msg->data, msg->data_size );
-        if (msg->msg == WM_INPUT && (flags & PM_REMOVE))
-            release_hardware_message( current->queue, data->hw_id );
+        if (data)
+        {
+            data->hw_id = msg->unique_id;
+            set_reply_data( msg->data, msg->data_size );
+        }
+        if ((msg->msg == WM_INPUT || msg->msg == WM_INPUT_DEVICE_CHANGE) && (flags & PM_REMOVE))
+            release_hardware_message( current->queue, msg->unique_id );
         return 1;
     }
     /* nothing found, clear the hardware queue bits */
@@ -2606,6 +2674,9 @@ DECL_HANDLER(send_hardware_message)
         break;
     case HW_INPUT_HID:
         queue_hid_message( req->win, &req->input, origin, sender, get_req_data(), get_req_data_size() );
+        break;
+    case HW_INPUT_DEVICE_CHANGE:
+        queue_hid_device_change_message( &req->input, origin );
         break;
     default:
         set_error( STATUS_INVALID_PARAMETER );

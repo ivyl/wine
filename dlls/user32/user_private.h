@@ -242,6 +242,7 @@ struct dce;
 struct tagWND;
 
 struct hardware_msg_data;
+extern HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan);
 extern BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_msg_data *msg_data);
 extern struct rawinput_thread_data *rawinput_thread_data(void);
 

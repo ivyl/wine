@@ -25,6 +25,7 @@
 #include "ddk/hidtypes.h"
 #include "ddk/wdm.h"
 #include "regstr.h"
+#include "wine/server.h"
 #include "wine/debug.h"
 #include "wine/list.h"
 
@@ -70,6 +71,27 @@ static NTSTATUS get_device_id(DEVICE_OBJECT *device, BUS_QUERY_ID_TYPE type, WCH
     CloseHandle(event);
 
     return status;
+}
+
+static void send_wm_input_device_change(DEVICE_OBJECT *device, WPARAM wparam)
+{
+    BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
+
+    if (ext->xinput_hack) return;
+
+    SERVER_START_REQ(send_hardware_message)
+    {
+        req->win                            = 0;
+        req->flags                          = 0;
+        req->input.type                     = HW_INPUT_DEVICE_CHANGE;
+        req->input.device_change.device     = wine_server_obj_handle(ext->link_handle);
+        req->input.device_change.wparam     = wparam;
+        req->input.device_change.usage_page = ext->preparseData->caps.UsagePage;
+        req->input.device_change.usage      = ext->preparseData->caps.Usage;
+
+        wine_server_call(req);
+    }
+    SERVER_END_REQ;
 }
 
 NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
@@ -319,10 +341,13 @@ NTSTATUS WINAPI HID_PNP_Dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             NtClose(tmp);
 
+            send_wm_input_device_change(device, GIDC_ARRIVAL);
+
             return rc;
         }
         case IRP_MN_REMOVE_DEVICE:
         {
+            send_wm_input_device_change(device, GIDC_REMOVAL);
             return PNP_RemoveDevice(minidriver, device, irp);
         }
         default:

@@ -2826,11 +2826,19 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             if (size >= sizeof(msg_data->hardware))
             {
                 hw_id = msg_data->hardware.hw_id;
-                if (!process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
-                                               hwnd, first, last, flags & PM_REMOVE ))
+                if (info.msg.message == WM_INPUT_DEVICE_CHANGE)
                 {
-                    TRACE("dropping msg %x\n", info.msg.message );
-                    continue;  /* ignore it */
+                    info.msg.lParam = (LPARAM) wine_server_ptr_handle( info.msg.lParam );
+                    info.msg.pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
+                }
+                else
+                {
+                    if (!process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
+                                                   hwnd, first, last, flags & PM_REMOVE ))
+                    {
+                        TRACE("dropping msg %x\n", info.msg.message );
+                        continue;  /* ignore it */
+                    }
                 }
                 *msg = info.msg;
                 thread_info->GetMessagePosVal = MAKELONG( info.msg.pt.x, info.msg.pt.y );
