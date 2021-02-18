@@ -39,9 +39,12 @@
 #include "user_private.h"
 
 #include "initguid.h"
+#include "devpkey.h"
 #include "ntddmou.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rawinput);
+
+DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 struct device
 {
@@ -93,11 +96,13 @@ static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int 
 
 static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 {
+    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
+    INT32 handle;
     struct device *device;
     HANDLE file;
     WCHAR *path, *pos;
-    DWORD size;
+    DWORD size, type;
 
     SetupDiGetDeviceInterfaceDetailW(set, iface, NULL, 0, &size, NULL);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
@@ -111,7 +116,17 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
         return FALSE;
     }
     detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
-    SetupDiGetDeviceInterfaceDetailW(set, iface, detail, size, NULL, NULL);
+    SetupDiGetDeviceInterfaceDetailW(set, iface, detail, size, NULL, &device_data);
+
+    if (!SetupDiGetDevicePropertyW(set, &device_data, &DEVPROPKEY_HID_HANDLE, &type, (BYTE *)&handle, sizeof(handle), NULL, 0))
+    {
+        ERR("Failed to get handle for %s, skipping HID device.\n", debugstr_w(detail->DevicePath));
+        heap_free(detail);
+        return NULL;
+    }
+
+    if (type != DEVPROP_TYPE_INT32)
+        ERR("Wrong prop type for HANDLE.\n");
 
     TRACE("Found HID device %s.\n", debugstr_w(detail->DevicePath));
 
@@ -148,7 +163,7 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     device->path = path;
     device->file = file;
     device->info.cbSize = sizeof(RID_DEVICE_INFO);
-    device->handle = 0;
+    device->handle = (HANDLE)(UINT_PTR) handle;
 
     return device;
 }
@@ -156,34 +171,14 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 static void find_devices(BOOL force);
 static HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan)
 {
-    WCHAR buffer[sizeof(OBJECT_NAME_INFORMATION) + MAX_PATH + 1];
-    OBJECT_NAME_INFORMATION *info = (OBJECT_NAME_INFORMATION*)&buffer;
-    ULONG dummy;
     unsigned int i;
 
     if (!device) return NULL;
 
-    /* check already known devices to avoid comparing paths again */
     for (i = 0; i < rawinput_devices_count; ++i)
     {
         if (rawinput_devices[i].handle == device)
             return &rawinput_devices[i];
-    }
-
-    if (NtQueryObject( device, ObjectNameInformation, &buffer, sizeof(buffer) - sizeof(WCHAR), &dummy ) || !info->Name.Buffer)
-        return NULL;
-
-    /* replace \??\ with \\?\ to match rawinput_devices paths */
-    if (info->Name.Length > 1 && info->Name.Buffer[0] == '\\' && info->Name.Buffer[1] == '?')
-        info->Name.Buffer[1] = '\\';
-
-    for (i = 0; i < rawinput_devices_count; ++i)
-    {
-        if (strcmpiW(rawinput_devices[i].path, info->Name.Buffer) == 0)
-        {
-            rawinput_devices[i].handle = device;
-            return &rawinput_devices[i];
-        }
     }
 
     if (!rescan)

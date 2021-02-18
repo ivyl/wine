@@ -317,14 +317,6 @@ NTSTATUS WINAPI HID_PNP_Dispatch(DEVICE_OBJECT *device, IRP *irp)
             attr.SecurityDescriptor = NULL;
             attr.SecurityQualityOfService = NULL;
 
-            if (!NtOpenSymbolicLinkObject(&tmp, SYMBOLIC_LINK_QUERY, &attr) &&
-                (ext->link_handle = ConvertToGlobalHandle(tmp)) != INVALID_HANDLE_VALUE)
-                TRACE("Opened link handle: %p for %s\n", ext->link_handle, debugstr_w(ext->link_name.Buffer));
-            else
-            {
-                ERR("Failed to open link %s, error %u.\n", debugstr_w(ext->link_name.Buffer), GetLastError());
-                ext->link_handle = 0;
-            }
             NtClose(tmp);
 
             return rc;

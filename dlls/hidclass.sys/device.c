@@ -35,10 +35,13 @@
 
 #include "initguid.h"
 #include "devguid.h"
+#include "devpkey.h"
 #include "ntddmou.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
 WINE_DECLARE_DEBUG_CHANNEL(hid_report);
+
+DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e',
     '\\','H','I','D','#','%','p','&','%','p',0};
@@ -76,6 +79,14 @@ NTSTATUS HID_CreateDevice(DEVICE_OBJECT *native_device, HID_MINIDRIVER_REGISTRAT
     return STATUS_SUCCESS;
 }
 
+/* user32 reserves 1 & 2 for winemouse and winekeyboard */
+#define WINE_KEYBOARD_HANDLE 2
+static INT32 alloc_new_handle(void)
+{
+    static INT32 counter = WINE_KEYBOARD_HANDLE+1;
+    return InterlockedIncrement(&counter);
+}
+
 NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
 {
     static const WCHAR backslashW[] = {'\\',0};
@@ -86,6 +97,7 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
     HDEVINFO devinfo;
     GUID hidGuid;
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
+    INT32 handle;
 
     HidD_GetHidGuid(&hidGuid);
     if (ext->xinput_hack) hidGuid.Data4[7]++; /* HACK: use different GUID so only xinput will find this device */
@@ -102,6 +114,9 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         FIXME( "failed to get ClassDevs %x\n", GetLastError());
         return STATUS_UNSUCCESSFUL;
     }
+
+    handle = alloc_new_handle();
+
     Data.cbSize = sizeof(Data);
     if (SetupDiCreateDeviceInfoW(devinfo, device_instance_id, &GUID_DEVCLASS_HIDCLASS, NULL, NULL, DICD_INHERIT_CLASSDRVS, &Data))
     {
@@ -111,11 +126,27 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
             goto error;
         }
     }
-    else if (GetLastError() != ERROR_DEVINST_ALREADY_EXISTS)
+    else if (GetLastError() == ERROR_DEVINST_ALREADY_EXISTS)
+    {
+        if (!SetupDiOpenDeviceInfoW(devinfo, device_instance_id, NULL, 0, &Data))
+        {
+            FIXME( "failed to open device info %x\n", GetLastError());
+            goto error;
+        }
+    }
+    else
     {
         FIXME( "failed to create device info %x\n", GetLastError());
         goto error;
     }
+
+    /* FIXME: This should use IoSetDevicePropertyData one implemented */
+    if (!SetupDiSetDevicePropertyW(devinfo, &Data, &DEVPROPKEY_HID_HANDLE, DEVPROP_TYPE_INT32, (const BYTE *)&handle, sizeof(handle), 0))
+    {
+        FIXME( "failed to set handle property %x\n", GetLastError());
+        goto error;
+    }
+
     SetupDiDestroyDeviceInfoList(devinfo);
 
     status = IoRegisterDeviceInterface(device, &hidGuid, NULL, &ext->link_name);
@@ -125,7 +156,7 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         return status;
     }
 
-    ext->link_handle = 0;
+    ext->link_handle = (HANDLE)(UINT_PTR) handle;
 
     /* FIXME: This should probably be done in mouhid.sys. */
     if (ext->preparseData->caps.UsagePage == HID_USAGE_PAGE_GENERIC
