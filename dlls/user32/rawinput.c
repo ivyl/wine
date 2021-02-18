@@ -179,24 +179,27 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 }
 
 static void find_devices(BOOL force);
-static HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan)
+static struct device *rawinput_device_from_handle(HANDLE handle)
 {
     unsigned int i;
 
-    if (!device) return NULL;
+    if (!handle) return NULL;
 
     for (i = 0; i < rawinput_devices_count; ++i)
     {
-        if (rawinput_devices[i].handle == device)
+        if (rawinput_devices[i].handle == handle)
             return &rawinput_devices[i];
     }
 
-    if (!rescan)
-        return NULL;
-
     find_devices(TRUE);
 
-    return rawinput_handle_from_device_handle(device, FALSE);
+    for (i = 0; i < rawinput_devices_count; ++i)
+    {
+        if (rawinput_devices[i].handle == handle)
+            return &rawinput_devices[i];
+    }
+
+    return NULL;
 }
 
 static void find_devices(BOOL force)
@@ -388,7 +391,7 @@ BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_ms
         }
 
         rawinput->header.dwSize  = FIELD_OFFSET(RAWINPUT, data.hid.bRawData) + msg_data->rawinput.hid.length;
-        rawinput->header.hDevice = rawinput_handle_from_device_handle(wine_server_ptr_handle(msg_data->rawinput.hid.device), TRUE);
+        rawinput->header.hDevice = wine_server_ptr_handle(msg_data->rawinput.hid.device);
         rawinput->header.wParam  = 0;
 
         rawinput->data.hid.dwSizeHid = msg_data->rawinput.hid.length;
@@ -448,7 +451,7 @@ UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_coun
 
     for (i = 0; i < rawinput_devices_count; ++i)
     {
-        devices[2 + i].hDevice = &rawinput_devices[i];
+        devices[2 + i].hDevice = rawinput_devices[i].handle;
         devices[2 + i].dwType = rawinput_devices[i].info.dwType;
     }
 
@@ -723,7 +726,7 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT
     static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
 
     RID_DEVICE_INFO info;
-    struct device *device = handle;
+    struct device *device = rawinput_device_from_handle(handle);
     const void *to_copy;
     UINT to_copy_bytes, avail_bytes;
 
