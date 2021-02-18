@@ -102,7 +102,7 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     struct device *device;
     HANDLE file;
     WCHAR *path, *pos;
-    DWORD size, type;
+    DWORD idx, size, type;
 
     SetupDiGetDeviceInterfaceDetailW(set, iface, NULL, 0, &size, NULL);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
@@ -127,6 +127,16 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 
     if (type != DEVPROP_TYPE_INT32)
         ERR("Wrong prop type for HANDLE.\n");
+
+    for (idx = 0; idx < rawinput_devices_count; ++idx)
+    {
+        if (rawinput_devices[idx].handle == (HANDLE)(UINT_PTR) handle)
+        {
+            TRACE("Discarding %s as it's a duplicate of %s.\n", debugstr_w(detail->DevicePath), debugstr_w(rawinput_devices[idx].path));
+            heap_free(detail);
+            return NULL;
+        }
+    }
 
     TRACE("Found HID device %s.\n", debugstr_w(detail->DevicePath));
 
@@ -217,6 +227,22 @@ static void find_devices(BOOL force)
     }
     rawinput_devices_count = 0;
 
+    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+
+    /* add mice first so we won't add the duplicated HID devices */
+    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
+    {
+        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
+
+        if (!(device = add_device(set, &iface)))
+            continue;
+
+        device->info.dwType = RIM_TYPEMOUSE;
+        device->info.u.mouse = mouse_info;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+
     set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 
     for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &hid_guid, idx, &iface); ++idx)
@@ -241,21 +267,6 @@ static void find_devices(BOOL force)
 
         device->info.u.hid.usUsagePage = caps.UsagePage;
         device->info.u.hid.usUsage = caps.Usage;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
-
-    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
-    {
-        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
-
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        device->info.dwType = RIM_TYPEMOUSE;
-        device->info.u.mouse = mouse_info;
     }
 
     SetupDiDestroyDeviceInfoList(set);
