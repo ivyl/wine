@@ -80,6 +80,7 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
     HDEVINFO devinfo;
     GUID hidGuid;
     BASE_DEVICE_EXTENSION *ext;
+    HKEY hkey;
 
     HidD_GetHidGuid(&hidGuid);
     ext = device->DeviceExtension;
@@ -104,6 +105,14 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
             FIXME( "failed to register device info %x\n", GetLastError());
             goto error;
         }
+
+        hkey = SetupDiCreateDevRegKeyW(devinfo, &Data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, NULL, NULL);
+        if (hkey == INVALID_HANDLE_VALUE)
+        {
+            FIXME( "failed to create driver reg key %x\n", GetLastError() );
+            goto error;
+        }
+        RegCloseKey(hkey);
     }
     else if (GetLastError() != ERROR_DEVINST_ALREADY_EXISTS)
     {
