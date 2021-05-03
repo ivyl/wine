@@ -7,4 +7,7 @@ C_SRCS = \
 	misc.c \
 	printf.c \
 	scanf.c \
-	string.c
+	string.c \
+	thread.c \
+	threaddll.c \
+	threaddll.spec
