@@ -600,6 +600,25 @@ static void test_thread_suspended(void)
     ok(ret == WAIT_OBJECT_0, "ret = %d\n", ret);
 }
 
+static void test_thread_invalid_params(void)
+{
+    uintptr_t hThread;
+
+    _doserrno = 0;
+    errno = 0;
+    hThread = _beginthreadex(NULL, 0, NULL, NULL, 0, NULL);
+    ok(hThread == -1, "_beginthreadex unexpected ret: %d\n", hThread);
+    ok(errno == EINVAL, "_beginthreadex unexpected errno: %d\n", errno);
+    ok(_doserrno == 0, "_beginthreadex unexpected _doserrno: %ld\n", _doserrno);
+
+    _doserrno = 0;
+    errno = 0;
+    hThread = _beginthread(NULL, 0, NULL);
+    ok(hThread == -1, "_beginthread unexpected ret: %d\n", hThread);
+    ok(errno == EINVAL, "_beginthread unexpected errno: %d\n", errno);
+    ok(_doserrno == 0, "_beginthread unexpected _doserrno: %ld\n", _doserrno);
+}
+
 static int __cdecl _lfind_s_comp(void *ctx, const void *l, const void *r)
 {
     *(int *)ctx = 0xdeadc0de;
@@ -698,5 +717,6 @@ START_TEST(misc)
     test_math_functions();
     test_thread_handle_close();
     test_thread_suspended();
+    test_thread_invalid_params();
     test__lfind_s();
 }
