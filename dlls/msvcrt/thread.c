@@ -118,9 +118,14 @@ uintptr_t CDECL _beginthread(
 
   TRACE("(%p, %d, %p)\n", start_address, stack_size, arglist);
 
+  if(!start_address) {
+      *_errno() = EINVAL;
+      return -1;
+  }
+
   trampoline = malloc(sizeof(*trampoline));
   if(!trampoline) {
-      *_errno() = EAGAIN;
+      *_errno() = EACCES;
       return -1;
   }
 
@@ -128,7 +133,7 @@ uintptr_t CDECL _beginthread(
           trampoline, CREATE_SUSPENDED, NULL);
   if(!thread) {
       free(trampoline);
-      *_errno() = EAGAIN;
+      msvcrt_set_errno(GetLastError());
       return -1;
   }
 
